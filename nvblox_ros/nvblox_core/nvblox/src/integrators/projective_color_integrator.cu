@@ -102,6 +102,9 @@ void ProjectiveColorIntegrator::integrateFrame(
   DepthImage* synthetic_depth_image = synthetic_depth_images_.get(
       image_size.rows, image_size.cols, MemoryType::kDevice);
 
+  // Sync sphere tracer max ray length with the (possibly updated) parameter.
+  sphere_tracer_.maximum_ray_length_m(max_integration_distance_m_);
+
   // Create a synthetic depth image
   timing::Timer sphere_trace_timer("color/integrate/sphere_trace");
   sphere_tracer_.renderImageOnGPU(
