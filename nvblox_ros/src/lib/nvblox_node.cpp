@@ -176,7 +176,7 @@ void NvbloxNode::subscribeToTopics()
           this, base_name + "/image",
           nvidia::isaac_ros::nitros::nitros_image_32FC1_t::supported_type_name,
           std::bind(&NvbloxNode::depthImageCallback, this, std::placeholders::_1),
-          nvidia::isaac_ros::nitros::NitrosStatisticsConfig(), input_qos));
+          nvidia::isaac_ros::nitros::NitrosDiagnosticsConfig(), input_qos));
     }
   }
   if (params_.use_color) {
@@ -192,7 +192,7 @@ void NvbloxNode::subscribeToTopics()
           this, base_name + "/image",
           nvidia::isaac_ros::nitros::nitros_image_rgb8_t::supported_type_name,
           std::bind(&NvbloxNode::colorImageCallback, this, std::placeholders::_1),
-          nvidia::isaac_ros::nitros::NitrosStatisticsConfig(), input_qos));
+          nvidia::isaac_ros::nitros::NitrosDiagnosticsConfig(), input_qos));
     }
   }
 
@@ -930,6 +930,28 @@ bool NvbloxNode::processLidarPointcloud(
     params_.max_angle_above_zero_elevation_rad) :
     Lidar(params_.lidar_width, params_.lidar_height, params_.lidar_vertical_fov_rad);
 
+  // Debug: log pointcloud and lidar params (throttled) to diagnose intrinsics issues
+  {
+    std::string field_names;
+    for (size_t i = 0; i < pointcloud_ptr->fields.size(); ++i) {
+      if (i > 0) { field_names += ", "; }
+      field_names += pointcloud_ptr->fields[i].name;
+    }
+    RCLCPP_INFO_STREAM_THROTTLE(
+      get_logger(), *get_clock(), 5000,
+      "[LiDAR debug] pointcloud: frame_id=\"" << pointcloud_ptr->header.frame_id
+      << "\" width=" << pointcloud_ptr->width << " height=" << pointcloud_ptr->height
+      << " point_step=" << pointcloud_ptr->point_step
+      << " fields=[" << field_names << "]");
+    RCLCPP_INFO_STREAM_THROTTLE(
+      get_logger(), *get_clock(), 5000,
+      "[LiDAR debug] lidar model: width=" << params_.lidar_width
+      << " height=" << params_.lidar_height
+      << " min_angle_below_zero_elevation_rad=" << params_.min_angle_below_zero_elevation_rad
+      << " max_angle_above_zero_elevation_rad=" << params_.max_angle_above_zero_elevation_rad
+      << " use_non_equal_vertical_fov=" << params_.use_non_equal_vertical_fov_lidar_params);
+  }
+
   // We check that the pointcloud is consistent with this LiDAR model
   // NOTE(alexmillane): If the check fails we return true which indicates that
   // this pointcloud can be removed from the queue even though it wasn't
@@ -937,10 +959,15 @@ bool NvbloxNode::processLidarPointcloud(
   // NOTE(alexmillane): Note that internally we cache checks, so each LiDAR
   // intrisics model is only tested against a single pointcloud. This is because
   // the check is expensive to perform.
-  if (!pointcloud_converter_.checkLidarPointcloud(pointcloud_ptr, lidar)) {
-    RCLCPP_ERROR_ONCE(
+  std::string lidar_check_failure_debug;
+  if (!pointcloud_converter_.checkLidarPointcloud(
+      pointcloud_ptr, lidar, &lidar_check_failure_debug)) {
+    RCLCPP_ERROR(
       get_logger(), "LiDAR intrinsics are inconsistent with the received "
       "pointcloud. Failing integration.");
+    if (!lidar_check_failure_debug.empty()) {
+      RCLCPP_ERROR(get_logger(), "LiDAR check debug: %s", lidar_check_failure_debug.c_str());
+    }
     return true;
   }
 

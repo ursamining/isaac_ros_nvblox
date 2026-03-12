@@ -18,6 +18,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/transform.h>
 
+#include <sstream>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 
 #include "nvblox_ros/conversions/pointcloud_conversions.hpp"
@@ -70,23 +71,79 @@ PointcloudConverter::PointcloudConverter(
 
 bool PointcloudConverter::checkLidarPointcloud(
     const sensor_msgs::msg::PointCloud2::ConstSharedPtr& pointcloud,
-    const Lidar& lidar) {
+    const Lidar& lidar,
+    std::string* failure_debug_output) {
   // Check the cache
   if (checked_lidar_models_.find(lidar) != checked_lidar_models_.end()) {
     return true;
   }
 
+  // Require "x", "y", "z" fields (lowercase) for the iterator
+  auto has_field = [&pointcloud](const std::string& name) {
+    for (const auto& f : pointcloud->fields) {
+      if (f.name == name) { return true; }
+    }
+    return false;
+  };
+  if (!has_field("x") || !has_field("y") || !has_field("z")) {
+    if (failure_debug_output != nullptr) {
+      std::ostringstream oss;
+      oss << "PointCloud2 must have 'x', 'y', 'z' fields (lowercase). Got fields: ";
+      for (size_t i = 0; i < pointcloud->fields.size(); ++i) {
+        if (i > 0) { oss << ", "; }
+        oss << "'" << pointcloud->fields[i].name << "'";
+      }
+      oss << ". width=" << pointcloud->width << " height=" << pointcloud->height;
+      *failure_debug_output = oss.str();
+    }
+    return false;
+  }
+
+  const int total_points = static_cast<int>(pointcloud->width * pointcloud->height);
+  int num_nan_skipped = 0;
+  int num_near_origin_skipped = 0;
+  int point_index = 0;
+
+  // Match Lidar::project() minimum range: points at/near origin are invalid
+  // (e.g. no-return from driver) and are skipped during integration.
+  constexpr float kMinProjectionEps = 0.01f;
+
   // Go through the pointcloud and check that each point projects to a pixel
   // center.
   sensor_msgs::PointCloud2ConstIterator<float> iter_xyz(*pointcloud, "x");
-  for (; iter_xyz != iter_xyz.end(); ++iter_xyz) {
+  for (; iter_xyz != iter_xyz.end(); ++iter_xyz, ++point_index) {
     Vector3f point(iter_xyz[0], iter_xyz[1], iter_xyz[2]);
     if (point.hasNaN()) {
+      num_nan_skipped++;
+      continue;
+    }
+    if (point.norm() < kMinProjectionEps) {
+      num_near_origin_skipped++;
       continue;
     }
     Vector2f u_C;
     if (!lidar.project(point, &u_C)) {
       // Point fell outside the FoV specified in the intrinsics.
+      if (failure_debug_output != nullptr) {
+        const float r = point.norm();
+        const float polar_angle_rad = (r > 1e-6f) ? acos(point.z() / r) : 0.0f;
+        const float azimuth_angle_rad = atan2(point.y(), point.x());
+        const float end_polar_rad =
+            lidar.start_polar_angle_rad() + lidar.vertical_fov_rad();
+        std::ostringstream oss;
+        oss << "First failing point at index " << point_index
+            << ": x=" << point.x() << " y=" << point.y() << " z=" << point.z()
+            << " (r=" << r << "). Spherical: polar_rad=" << polar_angle_rad
+            << " azimuth_rad=" << azimuth_angle_rad
+            << ". Lidar expects polar in ["
+            << lidar.start_polar_angle_rad() << ", " << end_polar_rad
+            << "] (vertical_fov_rad=" << lidar.vertical_fov_rad()
+            << "). Pointcloud: width=" << pointcloud->width
+            << " height=" << pointcloud->height << " total_points=" << total_points
+            << " num_nan_skipped=" << num_nan_skipped
+            << " num_near_origin_skipped=" << num_near_origin_skipped << ".";
+        *failure_debug_output = oss.str();
+      }
       return false;
     }
   }

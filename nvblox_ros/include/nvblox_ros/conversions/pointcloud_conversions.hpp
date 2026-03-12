@@ -67,9 +67,12 @@ public:
 
   // This function returns true if the pointcloud passed in is consistent with
   // the LiDAR intrinsics model.
+  // If the check fails and failure_debug_output is non-null, it is filled with
+  // details (first failing point, lidar FOV) for debugging.
   bool checkLidarPointcloud(
     const sensor_msgs::msg::PointCloud2::ConstSharedPtr & pointcloud,
-    const Lidar & lidar);
+    const Lidar & lidar,
+    std::string * failure_debug_output = nullptr);
 
   // Write the pointcloud to file
   void writeLidarPointcloudToFile(
