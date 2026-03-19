@@ -216,7 +216,7 @@ protected:
   static constexpr float kTimeBetweenDebugMessagesMs = 1000.0;
 
   /// Number of cameras supported (number of subscribers created).
-  static constexpr size_t kMaxNumCameras = 4;
+  static constexpr size_t kMaxNumCameras = 5;
 
   /// Depth topics to listen to. At least one of these topics has to transmit images. All topics
   /// are added to the same processing queue (depth or color) and thus gets the same treatment.
@@ -228,6 +228,7 @@ protected:
     "camera_1/depth",
     "camera_2/depth",
     "camera_3/depth",
+    "camera_4/depth",
   };
 
   /// Color topics to listen to.
@@ -239,6 +240,7 @@ protected:
     "camera_1/color",
     "camera_2/color",
     "camera_3/color",
+    "camera_4/color",
   };
 
 
